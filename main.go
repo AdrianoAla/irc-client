@@ -1,22 +1,18 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"net"
-	"os"
 	"strings"
+
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 )
 
 const SERVER = "cloverse.duckdns.org:6667"
 
-func handle_sending(connection net.Conn) {
-	scanner := bufio.NewScanner(os.Stdin)
-
-	for scanner.Scan() {
-		fmt.Println("Sent", scanner.Text())
-		connection.Write([]byte(scanner.Text() + "\r\n"))
-	}
+func handle_sending(message string, connection net.Conn) {
+	connection.Write([]byte(message + "\r\n"))
 }
 
 func parseMessage(message string) (string, string, []string) {
@@ -43,20 +39,7 @@ func parseMessage(message string) (string, string, []string) {
 
 }
 
-func main() {
-	connection, err := net.Dial("tcp", SERVER)
-
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	go handle_sending(connection)
-
-	connection.Write([]byte("NICK BotLol\r\n"))
-	connection.Write([]byte("USER BotLol 0 test :Arpidanzo \r\n"))
-	connection.Write([]byte("JOIN #test\r\n"))
-
+func handle_reading(connection net.Conn) {
 	for {
 		buf := make([]byte, 4096)
 		connection.Read(buf)
@@ -66,7 +49,58 @@ func main() {
 				continue
 			}
 			prefix, command, args := parseMessage(msg)
-			fmt.Println(prefix, command, args)
+			textView.SetText(textView.GetText(false) + prefix + " " + command + " [" + strings.Join(args, " ") + "]\n")
+			//fmt.Println(prefix, command, args)
+
 		}
 	}
+}
+
+var app = tview.NewApplication()
+
+var textView = tview.NewTextView().
+	SetDynamicColors(true).
+	SetRegions(true).
+	SetChangedFunc(func() {
+		app.Draw()
+	})
+
+var flex = tview.NewFlex().SetDirection(tview.FlexRow)
+
+func main() {
+	connection, err := net.Dial("tcp", SERVER)
+
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	input := tview.NewInputField().SetFieldBackgroundColor(tcell.Color102)
+
+	input.SetDoneFunc(func(key tcell.Key) {
+
+		if key != tcell.KeyEnter {
+			return
+		}
+
+		textView.SetText(textView.GetText(false) + input.GetText() + "\n")
+		handle_sending(input.GetText(), connection)
+
+		input.SetText("")
+
+	})
+
+	flex.AddItem(textView, 0, 10, false)
+	flex.AddItem(input, 1, 1, true)
+
+	go handle_reading(connection)
+
+	connection.Write([]byte("NICK BotLol\r\n"))
+	connection.Write([]byte("USER BotLol 0 test :Arpidanzo \r\n"))
+	connection.Write([]byte("JOIN #test\r\n"))
+
+	if err := app.SetRoot(flex, true).Run(); err != nil {
+		panic(err)
+	}
+
 }
